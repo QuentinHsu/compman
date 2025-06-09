@@ -55,7 +55,6 @@ jobs:
           dist/compman-*
           dist/checksums.txt
           dist/archives/*.tar.gz
-          dist/archives/checksums.txt
         draft: false
         prerelease: false
       env:

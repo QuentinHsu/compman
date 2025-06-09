@@ -120,12 +120,38 @@ create_archive() {
 generate_checksums() {
     echo -e "${YELLOW}🔍 生成校验和文件...${NC}"
     
+    # 检测校验和命令
+    local sha_cmd
+    if command -v sha256sum &> /dev/null; then
+        sha_cmd="sha256sum"
+    elif command -v shasum &> /dev/null; then
+        sha_cmd="shasum -a 256"
+    else
+        echo -e "${RED}❌ 找不到 sha256sum 或 shasum 命令${NC}"
+        return 1
+    fi
+    
+    # 创建统一的校验和文件
+    local checksum_file="${BUILD_DIR}/checksums.txt"
+    rm -f "${checksum_file}"
+    
     # 生成二进制文件校验和
-    (cd "${BUILD_DIR}" && find . -name "${PROJECT_NAME}-*" -not -name "*.tar.gz" -not -name "*.zip" -type f -exec sha256sum {} \; > checksums.txt)
+    echo "# Binary files" >> "${checksum_file}"
+    (cd "${BUILD_DIR}" && for file in ${PROJECT_NAME}-*; do
+        if [[ -f "$file" && ! "$file" =~ \.(tar\.gz|zip)$ ]]; then
+            ${sha_cmd} "$file"
+        fi
+    done) >> "${checksum_file}"
     
     # 生成压缩包校验和
     if [ "$COMPRESS" = "true" ]; then
-        (cd "${ARCHIVE_DIR}" && find . -name "*.tar.gz" -o -name "*.zip" -type f -exec sha256sum {} \; > checksums.txt)
+        echo "" >> "${checksum_file}"
+        echo "# Archive files" >> "${checksum_file}"
+        (cd "${ARCHIVE_DIR}" && for file in *.tar.gz *.zip; do
+            if [[ -f "$file" ]]; then
+                ${sha_cmd} "$file" | sed 's|^|archives/|'
+            fi
+        done 2>/dev/null) >> "${checksum_file}"
     fi
     
     echo -e "${GREEN}✅ 校验和文件已生成${NC}"
@@ -155,7 +181,6 @@ print_summary() {
         echo ""
         echo -e "${BLUE}🔍 校验和文件:${NC}"
         [ -f "${BUILD_DIR}/checksums.txt" ] && echo "  ${BUILD_DIR}/checksums.txt"
-        [ -f "${ARCHIVE_DIR}/checksums.txt" ] && echo "  ${ARCHIVE_DIR}/checksums.txt"
     fi
     
     echo ""
