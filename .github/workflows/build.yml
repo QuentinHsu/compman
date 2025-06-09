@@ -1,0 +1,87 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 触发条件：推送标签
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build:
+    name: Build for multiple platforms
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整的 git 历史
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Get version
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=$(git describe --tags --always --dirty)" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Build all platforms
+      run: |
+        chmod +x build-advanced.sh
+        VERSION=${{ steps.version.outputs.VERSION }} ./build-advanced.sh
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: compman-${{ steps.version.outputs.VERSION }}
+        path: |
+          dist/compman-*
+          dist/checksums.txt
+          dist/archives/
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/compman-*
+          dist/checksums.txt
+          dist/archives/*.tar.gz
+          dist/archives/checksums.txt
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 额外的作业：测试构建的二进制文件
+  test:
+    name: Test binaries
+    runs-on: ${{ matrix.os }}
+    needs: build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: compman-${{ needs.build.outputs.version }}
+    
+    - name: Test binary
+      run: |
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          chmod +x compman-*-linux-amd64
+          ./compman-*-linux-amd64 --version
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          chmod +x compman-*-darwin-amd64
+          ./compman-*-darwin-amd64 --version
+        fi
