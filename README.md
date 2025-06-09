@@ -26,39 +26,24 @@ Docker Compose Manager 是一个功能丰富的 Go 命令行工具，专为高�
 
 ## 📦 安装
 
+### 🚀 一键安装 (推荐)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/QuentinHsu/compman/main/install-online.sh | bash
+```
+
+### 📋 其他安装方式
+
+详细安装指南请参考 [INSTALL.md](INSTALL.md)，包含：
+
+- **在线安装**: 一键安装脚本，自动检测系统架构
+- **高级安装**: 支持自定义选项的完整安装脚本  
+- **手动安装**: 从 Releases 页面下载预编译二进制
+- **源码构建**: 从源代码编译安装
+
 ### 前置要求
-- Go 1.21 或更高版本
 - Docker 和 Docker Compose
-
-### 安装步骤
-
-1. 克隆项目：
-   ```bash
-   git clone https://github.com/yourusername/docker-compose-manager.git
-   cd docker-compose-manager
-   ```
-
-2. 安装依赖：
-   ```bash
-   go mod tidy
-   ```
-
-3. 构建二进制文件：
-   
-   - 当前系统环境所需：
-   ```bash
-   go build -o compman cmd/main.go
-   ```
-
-   - Linux amd64
-   ```
-   GOOS=linux GOARCH=amd64 go build -o compman cmd/main.go
-   ```
-
-4. （可选）安装到系统路径：
-   ```bash
-   sudo cp compman /usr/local/bin/
-   ```
+- Linux/macOS/Windows (支持 x86_64 和 ARM64)
 
 ## 🚀 使用指南
 
