@@ -14,17 +14,13 @@ import (
 var (
 	// 彩色输出函数
 	green   = color.New(color.FgGreen)
-	red     = color.New(color.FgRed)
-	yellow  = color.New(color.FgYellow)
 	blue    = color.New(color.FgBlue)
 	cyan    = color.New(color.FgCyan)
 	magenta = color.New(color.FgMagenta)
 	white   = color.New(color.FgWhite)
 
 	// 样式
-	bold      = color.New(color.Bold)
-	underline = color.New(color.Underline)
-	italic    = color.New(color.Italic)
+	bold = color.New(color.Bold)
 
 	// 组合样式
 	successStyle   = color.New(color.FgGreen, color.Bold)
@@ -71,6 +67,7 @@ func PrintSubHeader(message string) {
 func PrintSection(title string) {
 	fmt.Println()
 	cyan.Printf("═══ %s ═══\n", strings.ToUpper(title))
+	fmt.Println()
 }
 
 // PrintItem prints a list item with bullet point
@@ -109,6 +106,8 @@ func PrintTable(headers []string, rows [][]string) {
 	if len(headers) == 0 || len(rows) == 0 {
 		return
 	}
+
+	fmt.Println() // 表格前添加空行
 
 	// 计算列宽
 	colWidths := make([]int, len(headers))
@@ -171,6 +170,7 @@ func PrintTable(headers []string, rows [][]string) {
 		}
 	}
 	fmt.Printf("┘\n")
+	fmt.Println() // 表格后添加空行
 }
 
 // ProgressBar represents a simple progress bar
@@ -207,20 +207,27 @@ func (pb *ProgressBar) render() {
 	percent := float64(pb.current) / float64(pb.total)
 	filled := int(percent * float64(pb.width))
 
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", pb.width-filled)
+	bar := strings.Repeat("█", filled) + strings.Repeat("█", pb.width-filled)
 
-	fmt.Printf("\r%s [%s] %d/%d (%.1f%%)",
-		pb.prefix,
-		green.Sprint(bar[:filled])+white.Sprint(bar[filled:]),
-		pb.current,
-		pb.total,
-		percent*100)
+	// 检查是否完成
+	if pb.current >= pb.total {
+		fmt.Printf("\r[%s] 100%% (%d/%d) 完成",
+			green.Sprint(bar),
+			pb.total,
+			pb.total)
+	} else {
+		fmt.Printf("\r[%s] %.0f%% (%d/%d)",
+			green.Sprint(bar[:filled])+white.Sprint(bar[filled:]),
+			percent*100,
+			pb.current,
+			pb.total)
+	}
 }
 
 // Confirm asks for user confirmation
 func Confirm(message string) bool {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf("%s [y/N]: ", message)
+	fmt.Printf("\n%s [y/N]: ", message)
 
 	response, err := reader.ReadString('\n')
 	if err != nil {

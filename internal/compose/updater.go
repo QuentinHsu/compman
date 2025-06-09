@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"compman/internal/strategy"
+	"compman/internal/ui"
 	"compman/pkg/types"
 )
 
@@ -58,6 +59,43 @@ func (u *Updater) UpdateImages(composeFiles []*types.ComposeFile) ([]*types.Upda
 		}
 		allResults = append(allResults, results...)
 	}
+
+	return allResults, nil
+}
+
+// UpdateImagesWithProgress 使用 docker-compose 命令更新多个 Compose 文件，并显示进度
+func (u *Updater) UpdateImagesWithProgress(composeFiles []*types.ComposeFile, progressBar *ui.ProgressBar) ([]*types.UpdateResult, error) {
+	var allResults []*types.UpdateResult
+
+	for i, cf := range composeFiles {
+		// 更新进度条
+		progressBar.Update(i)
+
+		// 显示当前正在处理的文件
+		ui.PrintInfo(fmt.Sprintf("📄 正在处理: %s", filepath.Base(cf.FilePath)))
+
+		results, err := u.updateComposeFileSimple(cf)
+		if err != nil {
+			// 如果更新失败，记录错误但继续处理其他文件
+			result := &types.UpdateResult{
+				Service:   fmt.Sprintf("文件: %s", filepath.Base(cf.FilePath)),
+				OldImage:  "N/A",
+				NewImage:  "N/A",
+				Success:   false,
+				Error:     err,
+				UpdatedAt: time.Now(),
+			}
+			allResults = append(allResults, result)
+			continue
+		}
+		allResults = append(allResults, results...)
+
+		// 添加小的延时以便观察进度条
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// 更新到最终状态
+	progressBar.Update(len(composeFiles))
 
 	return allResults, nil
 }

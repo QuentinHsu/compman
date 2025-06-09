@@ -124,10 +124,6 @@ func (s *Scanner) isComposeFile(filename string) bool {
 	composePatterns := []string{
 		"docker-compose",
 		"compose",
-		"docker-compose.yml",
-		"docker-compose.yaml",
-		"compose.yml",
-		"compose.yaml",
 	}
 
 	for _, pattern := range composePatterns {

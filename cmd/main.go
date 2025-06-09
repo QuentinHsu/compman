@@ -144,7 +144,9 @@ func initConfig() {
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
+	ui.PrintEmptyLine()
 	ui.PrintInfo("🚀 开始更新 Docker Compose 服务镜像...")
+	ui.PrintEmptyLine()
 
 	// 加载配置
 	cfg, err := config.LoadConfig()
@@ -176,6 +178,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(allComposeFiles) == 0 {
+		ui.PrintEmptyLine()
 		ui.PrintWarning("未找到任何 Docker Compose 文件")
 		return nil
 	}
@@ -189,6 +192,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if updateAll {
 		// 更新所有文件
 		composeFiles = allComposeFiles
+		ui.PrintEmptyLine()
 		ui.PrintInfo("📝 将更新所有 Compose 文件")
 	} else if len(args) > 0 {
 		// 根据命令行参数选择文件
@@ -205,26 +209,41 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(composeFiles) == 0 {
+		ui.PrintEmptyLine()
 		ui.PrintWarning("没有选择任何文件进行更新")
 		return nil
 	}
 
+	ui.PrintEmptyLine()
 	ui.PrintSuccess(fmt.Sprintf("✅ 将处理 %d 个 Compose 文件", len(composeFiles)))
+
+	// 显示开始更新的消息
+	ui.PrintEmptyLine()
+	ui.PrintInfo("🚀 开始更新镜像...")
+	ui.PrintEmptyLine()
 
 	// 创建更新器
 	updater := compose.NewUpdater(cfg)
 
+	// 创建进度条
+	progressBar := ui.NewProgressBar(len(composeFiles), "更新进度")
+
 	// 更新镜像
-	results, err := updater.UpdateImages(composeFiles)
+	results, err := updater.UpdateImagesWithProgress(composeFiles, progressBar)
 	if err != nil {
 		return fmt.Errorf("更新镜像失败: %v", err)
 	}
+
+	// 完成进度条
+	progressBar.Finish()
+	ui.PrintEmptyLine()
 
 	// 显示结果
 	displayUpdateResults(results)
 
 	// 清理未使用的镜像
 	if !dryRun {
+		ui.PrintEmptyLine()
 		ui.PrintInfo("🧹 清理未使用的镜像...")
 		dockerClient := docker.NewClient()
 		err = dockerClient.CleanupUnusedImages()
@@ -233,13 +252,16 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		} else {
 			ui.PrintSuccess("✅ 镜像清理完成")
 		}
+		ui.PrintEmptyLine()
 	}
 
 	return nil
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
+	ui.PrintEmptyLine()
 	ui.PrintInfo("🧹 开始清理未使用的 Docker 镜像...")
+	ui.PrintEmptyLine()
 
 	dockerClient := docker.NewClient()
 
@@ -251,14 +273,18 @@ func runClean(cmd *cobra.Command, args []string) error {
 		}
 
 		if len(images) == 0 {
+			ui.PrintEmptyLine()
 			ui.PrintSuccess("✅ 没有发现未使用的镜像")
+			ui.PrintEmptyLine()
 			return nil
 		}
 
+		ui.PrintEmptyLine()
 		ui.PrintInfo(fmt.Sprintf("发现 %d 个未使用的镜像:", len(images)))
 		for _, img := range images {
 			ui.PrintItem(fmt.Sprintf("• %s (%s)", img.Repository+":"+img.Tag, formatSize(img.Size)))
 		}
+		ui.PrintEmptyLine()
 		return nil
 	}
 
@@ -267,12 +293,16 @@ func runClean(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("清理镜像失败: %v", err)
 	}
 
+	ui.PrintEmptyLine()
 	ui.PrintSuccess("✅ 镜像清理完成")
+	ui.PrintEmptyLine()
 	return nil
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
+	ui.PrintEmptyLine()
 	ui.PrintInfo("🔍 扫描 Docker Compose 文件...")
+	ui.PrintEmptyLine()
 
 	// 加载配置
 	cfg, err := config.LoadConfig()
@@ -298,7 +328,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// 显示结果
 	if len(composeFiles) == 0 {
+		ui.PrintEmptyLine()
 		ui.PrintWarning("未找到任何 Docker Compose 文件")
+		ui.PrintEmptyLine()
 		return nil
 	}
 
@@ -320,6 +352,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	ui.PrintEmptyLine()
 	ui.PrintInfo("📁 配置文件信息")
 	ui.PrintItem(fmt.Sprintf("默认配置文件路径: %s", defaultPath))
 
@@ -347,6 +380,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	ui.PrintItem(fmt.Sprintf("环境: %s", cfg.Environment))
 	ui.PrintItem(fmt.Sprintf("备份启用: %t", cfg.BackupEnabled))
 	ui.PrintItem(fmt.Sprintf("超时时间: %s", cfg.Timeout))
+	ui.PrintEmptyLine()
 
 	return nil
 }
@@ -354,24 +388,27 @@ func runConfig(cmd *cobra.Command, args []string) error {
 func displayUpdateResults(results []*types.UpdateResult) {
 	successCount := 0
 	failureCount := 0
+	skippedCount := 0
 
-	ui.PrintSection("更新结果")
+	ui.PrintEmptyLine()
+	ui.PrintSuccess("✅ 更新完成！")
+	ui.PrintEmptyLine()
 
 	for _, result := range results {
 		if result.Success {
 			successCount++
-			ui.PrintSuccess(fmt.Sprintf("✅ %s: %s → %s",
-				result.Service, result.OldImage, result.NewImage))
-		} else {
+		} else if result.Error != nil {
 			failureCount++
-			ui.PrintError(fmt.Sprintf("❌ %s: %v", result.Service, result.Error))
+		} else {
+			skippedCount++
 		}
 	}
 
-	ui.PrintSection("统计信息")
-	ui.PrintInfo(fmt.Sprintf("• 成功更新: %s", color.GreenString("%d", successCount)))
-	ui.PrintInfo(fmt.Sprintf("• 失败: %s", color.RedString("%d", failureCount)))
-	ui.PrintInfo(fmt.Sprintf("• 总计: %d", len(results)))
+	// 显示统计信息，与README.md格式一致
+	ui.PrintInfo(fmt.Sprintf("- 成功更新: %s 个镜像", color.GreenString("%d", successCount)))
+	ui.PrintInfo(fmt.Sprintf("- 跳过: %s 个镜像", color.YellowString("%d", skippedCount)))
+	ui.PrintInfo(fmt.Sprintf("- 失败: %s 个镜像", color.RedString("%d", failureCount)))
+	ui.PrintEmptyLine()
 }
 
 func displayDetailedScanResults(composeFiles []*types.ComposeFile) {
@@ -386,6 +423,7 @@ func displayDetailedScanResults(composeFiles []*types.ComposeFile) {
 
 		if len(cf.Services) == 0 {
 			ui.PrintWarning("  无服务定义")
+			ui.PrintEmptyLine()
 			continue
 		}
 
@@ -399,36 +437,6 @@ func displayDetailedScanResults(composeFiles []*types.ComposeFile) {
 			}
 		}
 		ui.PrintEmptyLine()
-	}
-}
-
-func displayScanResults(composeFiles []*types.ComposeFile) {
-	if len(composeFiles) == 0 {
-		ui.PrintWarning("未找到任何 Docker Compose 文件")
-		return
-	}
-
-	ui.PrintSection("扫描结果")
-	ui.PrintSuccess(fmt.Sprintf("找到 %d 个 Docker Compose 文件", len(composeFiles)))
-
-	for _, cf := range composeFiles {
-		relPath, _ := filepath.Rel(".", cf.FilePath)
-		ui.PrintSubHeader(fmt.Sprintf("📄 %s", relPath))
-
-		if len(cf.Services) == 0 {
-			ui.PrintWarning("  无服务定义")
-			continue
-		}
-
-		for serviceName, service := range cf.Services {
-			if service.Image != "" {
-				ui.PrintItem(fmt.Sprintf("  • %s: %s", serviceName, service.Image))
-			} else if service.Build != nil {
-				ui.PrintItem(fmt.Sprintf("  • %s: [构建镜像] %s", serviceName, service.Build.Context))
-			} else {
-				ui.PrintItem(fmt.Sprintf("  • %s: [未定义镜像]", serviceName))
-			}
-		}
 	}
 }
 
@@ -451,13 +459,16 @@ func main() {
 	rootCmd.SetVersionTemplate(`{{printf "%s\n" .Version}}`)
 
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Println()
 		color.Red("错误: %v", err)
+		fmt.Println()
 		os.Exit(1)
 	}
 }
 
 // displayComposeList shows all found compose files with numbering
 func displayComposeList(composeFiles []*types.ComposeFile) {
+	ui.PrintEmptyLine()
 	ui.PrintSection("🔍 发现的 Docker Compose 文件")
 
 	headers := []string{"序号", "项目名称", "文件路径", "服务数量", "镜像服务"}
@@ -580,6 +591,7 @@ func interactiveSelectCompose(allFiles []*types.ComposeFile) ([]*types.ComposeFi
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
+		ui.PrintEmptyLine()
 		ui.PrintInfo("🎯 请选择要更新的 Compose 文件:")
 		ui.PrintItem("• 输入序号: 1,3,5 或 1-3")
 		ui.PrintItem("• 输入 'a' 或 'all' 选择全部")
@@ -594,6 +606,7 @@ func interactiveSelectCompose(allFiles []*types.ComposeFile) ([]*types.ComposeFi
 		input = strings.TrimSpace(input)
 
 		if input == "" {
+			ui.PrintEmptyLine()
 			ui.PrintWarning("请输入有效的选择")
 			ui.PrintEmptyLine()
 			continue
@@ -603,17 +616,20 @@ func interactiveSelectCompose(allFiles []*types.ComposeFile) ([]*types.ComposeFi
 		case "q", "quit", "exit":
 			return nil, fmt.Errorf("用户取消操作")
 		case "a", "all":
+			ui.PrintEmptyLine()
 			ui.PrintSuccess("已选择所有文件")
 			return allFiles, nil
 		default:
 			selectedFiles, err := selectComposeFilesByArgs(allFiles, []string{input})
 			if err != nil {
+				ui.PrintEmptyLine()
 				ui.PrintError(fmt.Sprintf("选择错误: %v", err))
 				ui.PrintEmptyLine()
 				continue
 			}
 
 			if len(selectedFiles) > 0 {
+				ui.PrintEmptyLine()
 				ui.PrintSuccess(fmt.Sprintf("已选择 %d 个文件", len(selectedFiles)))
 
 				// 显示选中的文件
@@ -624,14 +640,17 @@ func interactiveSelectCompose(allFiles []*types.ComposeFile) ([]*types.ComposeFi
 					ui.PrintItem(fmt.Sprintf("%d. %s (%s)", i+1, projectName, relPath))
 				}
 
+				ui.PrintEmptyLine()
 				if ui.Confirm("确认更新以上文件?") {
 					return selectedFiles, nil
 				} else {
+					ui.PrintEmptyLine()
 					ui.PrintInfo("重新选择...")
 					ui.PrintEmptyLine()
 					// 继续循环，重新选择
 				}
 			} else {
+				ui.PrintEmptyLine()
 				ui.PrintWarning("没有选择任何文件")
 				ui.PrintEmptyLine()
 			}
