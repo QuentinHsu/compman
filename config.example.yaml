@@ -1,0 +1,55 @@
+# Docker Compose Manager 配置文件示例
+# 复制此文件为 config.yaml 或 ~/.compman.yaml 并根据需要修改
+
+# Compose 文件搜索路径
+compose_paths:
+  - "/opt/1panel/docker/compose"  # 1Panel 编排文件目录
+  - "./docker-compose.yml"        # 当前目录的 compose 文件
+  - "./compose"                   # compose 子目录
+  - "/home/user/docker"           # 用户 docker 目录
+
+# 镜像标签更新策略
+# 选项: "latest", "semver"
+image_tag_strategy: "latest"
+
+# 运行环境 (可选，用于日志和配置区分)
+environment: "production"
+
+# 语义版本匹配模式 (仅当 image_tag_strategy 为 "semver" 时有效)
+# 支持的模式:
+# - "*"                    # 任意版本
+# - "^1.0.0"              # 兼容 1.x.x 版本
+# - "~1.2.0"              # 兼容 1.2.x 版本
+# - ">= 1.0.0, < 2.0.0"   # 版本范围
+# - "1.2.3"               # 精确版本
+semver_pattern: "^1.0.0"
+
+# 排除的镜像列表 (支持部分匹配)
+exclude_images:
+  - "mysql"           # 排除所有包含 mysql 的镜像
+  - "redis"           # 排除所有包含 redis 的镜像
+  - "postgres"        # 排除所有包含 postgres 的镜像
+  - "nginx:1.20"      # 排除特定版本
+
+# 干运行模式 (true: 只显示将要执行的操作，不实际执行)
+dry_run: false
+
+# 备份设置 (更新前是否备份原文件)
+backup_enabled: true
+
+# 操作超时时间
+timeout: "5m"
+
+# Docker 配置
+docker_config:
+  # Docker daemon 地址 (留空使用默认)
+  host: ""
+  
+  # API 版本 (留空自动协商)
+  api_version: ""
+  
+  # TLS 验证
+  tls_verify: false
+  
+  # 证书路径
+  cert_path: ""
