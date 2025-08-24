@@ -7,8 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fatih/color"
+	"golang.org/x/term"
 )
 
 var (
@@ -101,7 +103,28 @@ func PrintBanner(version string) {
 	fmt.Println()
 }
 
-// PrintTable prints a simple table
+// getTerminalWidth 获取终端宽度
+func getTerminalWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 80 // 默认宽度
+	}
+	return width
+}
+
+// truncateString 截断字符串并添加省略号
+func truncateString(s string, maxLen int) string {
+	if maxLen <= 3 {
+		return "..."
+	}
+	if utf8.RuneCountInString(s) <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxLen-3]) + "..."
+}
+
+// PrintTable prints a responsive table that adapts to terminal width
 func PrintTable(headers []string, rows [][]string) {
 	if len(headers) == 0 || len(rows) == 0 {
 		return
@@ -109,17 +132,46 @@ func PrintTable(headers []string, rows [][]string) {
 
 	fmt.Println() // 表格前添加空行
 
-	// 计算列宽
+	terminalWidth := getTerminalWidth()
+	
+	// 检查是否为小屏幕（宽度小于100）
+	if terminalWidth < 100 {
+		printCompactTable(headers, rows)
+		return
+	}
+
+	// 原有表格逻辑（适用于大屏幕）
 	colWidths := make([]int, len(headers))
 	for i, header := range headers {
-		colWidths[i] = len(header)
+		colWidths[i] = utf8.RuneCountInString(header)
 	}
 
 	for _, row := range rows {
 		for i, cell := range row {
-			if i < len(colWidths) && len(cell) > colWidths[i] {
-				colWidths[i] = len(cell)
+			if i < len(colWidths) {
+				cellWidth := utf8.RuneCountInString(cell)
+				if cellWidth > colWidths[i] {
+					colWidths[i] = cellWidth
+				}
 			}
+		}
+	}
+
+	// 计算总宽度并调整列宽
+	totalWidth := 0
+	for _, width := range colWidths {
+		totalWidth += width + 3 // +3 for " │ "
+	}
+	totalWidth += 1 // for final "│"
+
+	// 如果总宽度超过终端宽度，按比例缩放
+	if totalWidth > terminalWidth-5 { // 预留5个字符的边距
+		availableWidth := terminalWidth - 5 - (len(colWidths)*3 + 1)
+		scaleFactor := float64(availableWidth) / float64(totalWidth-(len(colWidths)*3+1))
+		
+		for i := range colWidths {
+			newWidth := max(8, int(float64(colWidths[i]) * scaleFactor)) // 最小宽度8
+			colWidths[i] = newWidth
 		}
 	}
 
@@ -136,7 +188,8 @@ func PrintTable(headers []string, rows [][]string) {
 	// 打印表头内容
 	fmt.Printf("│")
 	for i, header := range headers {
-		fmt.Printf(" %-*s │", colWidths[i], bold.Sprint(header))
+		headerText := truncateString(header, colWidths[i])
+		fmt.Printf(" %-*s │", colWidths[i], bold.Sprint(headerText))
 	}
 	fmt.Printf("\n")
 
@@ -155,7 +208,8 @@ func PrintTable(headers []string, rows [][]string) {
 		fmt.Printf("│")
 		for i, cell := range row {
 			if i < len(colWidths) {
-				fmt.Printf(" %-*s │", colWidths[i], cell)
+				cellText := truncateString(cell, colWidths[i])
+				fmt.Printf(" %-*s │", colWidths[i], cellText)
 			}
 		}
 		fmt.Printf("\n")
@@ -171,6 +225,32 @@ func PrintTable(headers []string, rows [][]string) {
 	}
 	fmt.Printf("┘\n")
 	fmt.Println() // 表格后添加空行
+}
+
+// printCompactTable 打印紧凑模式的表格，适用于小屏幕
+func printCompactTable(_ []string, rows [][]string) {
+	// 对于小屏幕，使用列表格式显示
+	for i, row := range rows {
+		fmt.Printf("%s %s\n", bold.Sprint(fmt.Sprintf("[%s]", row[0])), cyan.Sprint(row[1])) // 序号和项目名称
+		
+		if len(row) > 2 && row[2] != "" {
+			fmt.Printf("    📁 %s\n", truncateString(row[2], 60)) // 文件路径
+		}
+		
+		if len(row) > 3 && row[3] != "" {
+			fmt.Printf("    🔧 服务数量: %s\n", row[3])
+		}
+		
+		if len(row) > 4 && row[4] != "" {
+			services := truncateString(row[4], 50)
+			fmt.Printf("    🐳 镜像服务: %s\n", services)
+		}
+		
+		if i < len(rows)-1 {
+			fmt.Printf("%s\n", strings.Repeat("─", 50))
+		}
+	}
+	fmt.Println()
 }
 
 // ProgressBar represents a simple progress bar
