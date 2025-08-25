@@ -255,18 +255,20 @@ func printCompactTable(_ []string, rows [][]string) {
 
 // ProgressBar represents a simple progress bar
 type ProgressBar struct {
-	total   int
-	current int
-	width   int
-	prefix  string
+	total     int
+	current   int
+	width     int
+	prefix    string
+	currentOp string
 }
 
 // NewProgressBar creates a new progress bar
 func NewProgressBar(total int, prefix string) *ProgressBar {
 	return &ProgressBar{
-		total:  total,
-		width:  50,
-		prefix: prefix,
+		total:     total,
+		width:     50,
+		prefix:    prefix,
+		currentOp: "",
 	}
 }
 
@@ -276,31 +278,76 @@ func (pb *ProgressBar) Update(current int) {
 	pb.render()
 }
 
+// UpdateWithMessage updates the progress bar with a current operation message
+func (pb *ProgressBar) UpdateWithMessage(current int, message string) {
+	pb.current = current
+	pb.currentOp = message
+	pb.render()
+}
+
 // Finish completes the progress bar
 func (pb *ProgressBar) Finish() {
 	pb.current = pb.total
+	pb.currentOp = ""
 	pb.render()
 	fmt.Println()
+}
+
+// SetCurrentOperation sets the current operation message without updating progress
+func (pb *ProgressBar) SetCurrentOperation(message string) {
+	pb.currentOp = message
+	pb.render()
+}
+
+// DetailedProgressBar represents a more detailed progress bar for file operations
+type DetailedProgressBar struct {
+	*ProgressBar
+	services   []string
+	currentSvc int
+}
+
+// NewDetailedProgressBar creates a detailed progress bar
+func NewDetailedProgressBar(totalFiles int, services []string, prefix string) *DetailedProgressBar {
+	return &DetailedProgressBar{
+		ProgressBar: NewProgressBar(totalFiles, prefix),
+		services:    services,
+		currentSvc:  0,
+	}
+}
+
+// UpdateService updates the current service being processed
+func (dpb *DetailedProgressBar) UpdateService(fileIndex int, serviceIndex int, serviceName string, operation string) {
+	dpb.currentSvc = serviceIndex
+	message := fmt.Sprintf("📦 %s - %s (%d/%d)", serviceName, operation, serviceIndex+1, len(dpb.services))
+	dpb.UpdateWithMessage(fileIndex, message)
 }
 
 func (pb *ProgressBar) render() {
 	percent := float64(pb.current) / float64(pb.total)
 	filled := int(percent * float64(pb.width))
 
-	bar := strings.Repeat("█", filled) + strings.Repeat("█", pb.width-filled)
+	filledBar := strings.Repeat("█", filled)
+	emptyBar := strings.Repeat("░", pb.width-filled)
 
 	// 检查是否完成
 	if pb.current >= pb.total {
-		fmt.Printf("\r[%s] 100%% (%d/%d) 完成",
-			green.Sprint(bar),
+		fmt.Printf("\r%s [%s] 100%% (%d/%d) ✅ 完成",
+			pb.prefix,
+			green.Sprint(filledBar+emptyBar),
 			pb.total,
 			pb.total)
 	} else {
-		fmt.Printf("\r[%s] %.0f%% (%d/%d)",
-			green.Sprint(bar[:filled])+white.Sprint(bar[filled:]),
+		message := ""
+		if pb.currentOp != "" {
+			message = fmt.Sprintf(" - %s", pb.currentOp)
+		}
+		fmt.Printf("\r%s [%s] %.0f%% (%d/%d)%s",
+			pb.prefix,
+			green.Sprint(filledBar)+white.Sprint(emptyBar),
 			percent*100,
 			pb.current,
-			pb.total)
+			pb.total,
+			message)
 	}
 }
 
