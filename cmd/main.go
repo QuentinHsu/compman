@@ -225,17 +225,21 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// 创建更新器
 	updater := compose.NewUpdater(cfg)
 
-	// 创建进度条
-	progressBar := ui.NewProgressBar(len(composeFiles), "更新进度")
+	// 创建多进度条
+	fileNames := make([]string, len(composeFiles))
+	for i, cf := range composeFiles {
+		fileNames[i] = filepath.Base(cf.FilePath)
+	}
+	multiProgressBar := ui.NewMultiProgressBar(fileNames)
 
 	// 更新镜像
-	results, err := updater.UpdateImagesWithProgress(composeFiles, progressBar)
+	results, err := updater.UpdateImagesWithMultiProgress(composeFiles, multiProgressBar)
 	if err != nil {
 		return fmt.Errorf("更新镜像失败: %v", err)
 	}
 
-	// 完成进度条
-	progressBar.Finish()
+	// 完成所有进度条
+	multiProgressBar.Finish()
 	ui.PrintEmptyLine()
 
 	// 显示结果

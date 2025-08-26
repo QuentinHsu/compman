@@ -71,9 +71,6 @@ func (u *Updater) UpdateImagesWithProgress(composeFiles []*types.ComposeFile, pr
 	var allResults []*types.UpdateResult
 
 	for i, cf := range composeFiles {
-		// 更新进度条显示当前文件
-		progressBar.UpdateWithMessage(i, fmt.Sprintf("📄 处理文件: %s", filepath.Base(cf.FilePath)))
-
 		results, err := u.updateComposeFileWithProgress(cf, progressBar, i, len(composeFiles))
 		if err != nil {
 			// 如果更新失败，记录错误但继续处理其他文件
@@ -86,19 +83,60 @@ func (u *Updater) UpdateImagesWithProgress(composeFiles []*types.ComposeFile, pr
 				UpdatedAt: time.Now(),
 			}
 			allResults = append(allResults, result)
-			continue
+		} else {
+			allResults = append(allResults, results...)
 		}
-		allResults = append(allResults, results...)
-	}
 
-	// 更新到最终状态
-	progressBar.Update(len(composeFiles))
+		// 更新进度，但如果是最后一个文件则让 Finish() 处理
+		if i < len(composeFiles)-1 {
+			progressBar.Update(i + 1)
+		} else {
+			// 最后一个文件，设置操作信息但不调用 Update
+			progressBar.SetCurrentOperation(fmt.Sprintf("✅ 完成文件: %s", filepath.Base(cf.FilePath)))
+		}
+	}
 
 	return allResults, nil
 }
 
-// updateComposeFileWithProgress 使用 docker-compose 命令更新文件，并显示详细进度
-func (u *Updater) updateComposeFileWithProgress(cf *types.ComposeFile, progressBar *ui.ProgressBar, fileIndex, totalFiles int) ([]*types.UpdateResult, error) {
+// UpdateImagesWithMultiProgress 使用多进度条更新多个 Compose 文件
+func (u *Updater) UpdateImagesWithMultiProgress(composeFiles []*types.ComposeFile, multiProgressBar *ui.MultiProgressBar) ([]*types.UpdateResult, error) {
+	var allResults []*types.UpdateResult
+
+	// 首先渲染所有进度条的初始状态
+	for i := range composeFiles {
+		multiProgressBar.UpdateFile(i, 0, "等待中...")
+	}
+
+	for i, cf := range composeFiles {
+		// 开始处理文件
+		multiProgressBar.UpdateFile(i, 5, "📄 准备处理...")
+		time.Sleep(300 * time.Millisecond)
+
+		results, err := u.updateComposeFileWithMultiProgress(cf, multiProgressBar, i)
+		if err != nil {
+			// 如果更新失败，标记为失败
+			multiProgressBar.UpdateFile(i, 100, "❌ 处理失败")
+			result := &types.UpdateResult{
+				Service:   fmt.Sprintf("文件: %s", filepath.Base(cf.FilePath)),
+				OldImage:  "N/A",
+				NewImage:  "N/A",
+				Success:   false,
+				Error:     err,
+				UpdatedAt: time.Now(),
+			}
+			allResults = append(allResults, result)
+		} else {
+			allResults = append(allResults, results...)
+			multiProgressBar.FinishFile(i)
+		}
+	}
+
+	return allResults, nil
+}
+
+// updateComposeFileWithMultiProgress 使用多进度条更新单个文件
+func (u *Updater) updateComposeFileWithMultiProgress(cf *types.ComposeFile, multiProgressBar *ui.MultiProgressBar, fileIndex int) ([]*types.UpdateResult, error) {
 	var results []*types.UpdateResult
 
 	// 获取文件目录
@@ -112,7 +150,18 @@ func (u *Updater) updateComposeFileWithProgress(cf *types.ComposeFile, progressB
 
 	// 如果是干运行模式，只模拟操作
 	if u.config.DryRun {
-		progressBar.UpdateWithMessage(fileIndex, "🧪 模拟模式 - 跳过实际更新")
+		multiProgressBar.UpdateFile(fileIndex, 20, "🧪 模拟模式 - 初始化...")
+		time.Sleep(400 * time.Millisecond)
+
+		multiProgressBar.UpdateFile(fileIndex, 40, "🧪 模拟模式 - 检查镜像...")
+		time.Sleep(400 * time.Millisecond)
+
+		multiProgressBar.UpdateFile(fileIndex, 70, "🧪 模拟模式 - 处理服务...")
+		time.Sleep(400 * time.Millisecond)
+
+		multiProgressBar.UpdateFile(fileIndex, 90, "🧪 模拟模式 - 完成中...")
+		time.Sleep(400 * time.Millisecond)
+
 		for serviceName := range cf.Services {
 			result := &types.UpdateResult{
 				Service:   serviceName,
@@ -128,14 +177,68 @@ func (u *Updater) updateComposeFileWithProgress(cf *types.ComposeFile, progressB
 	}
 
 	// 第一步：拉取镜像
-	progressBar.UpdateWithMessage(fileIndex, "⬇️ 正在拉取最新镜像...")
+	multiProgressBar.UpdateFile(fileIndex, 30, "⬇️ 正在拉取最新镜像...")
+	pullResults, err := u.executeDockerComposePullWithMultiProgress(dir, fileName, cf, multiProgressBar, fileIndex)
+	if err != nil {
+		return nil, fmt.Errorf("拉取镜像失败: %v", err)
+	}
+
+	// 第二步：重启服务
+	multiProgressBar.UpdateFile(fileIndex, 70, "🔄 正在重启服务...")
+	upResults, err := u.executeDockerComposeUpWithMultiProgress(dir, fileName, cf, multiProgressBar, fileIndex)
+	if err != nil {
+		return nil, fmt.Errorf("重启服务失败: %v", err)
+	}
+
+	// 合并结果
+	results = append(results, pullResults...)
+	results = append(results, upResults...)
+
+	return results, nil
+}
+
+// updateComposeFileWithProgress 使用 docker-compose 命令更新文件，并显示详细进度
+func (u *Updater) updateComposeFileWithProgress(cf *types.ComposeFile, progressBar *ui.ProgressBar, fileIndex, totalFiles int) ([]*types.UpdateResult, error) {
+	var results []*types.UpdateResult
+
+	// 获取文件目录
+	dir := filepath.Dir(cf.FilePath)
+	fileName := filepath.Base(cf.FilePath)
+
+	// 检查文件是否存在
+	if _, err := os.Stat(cf.FilePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("文件不存在: %s", cf.FilePath)
+	}
+
+	// 显示正在处理的文件
+	progressBar.SetCurrentOperation(fmt.Sprintf("📄 处理文件: %s", fileName))
+
+	// 如果是干运行模式，只模拟操作
+	if u.config.DryRun {
+		progressBar.SetCurrentOperation("🧪 模拟模式 - 跳过实际更新")
+		for serviceName := range cf.Services {
+			result := &types.UpdateResult{
+				Service:   serviceName,
+				OldImage:  "模拟 - 当前镜像",
+				NewImage:  "模拟 - 最新镜像",
+				Success:   true,
+				Error:     nil,
+				UpdatedAt: time.Now(),
+			}
+			results = append(results, result)
+		}
+		return results, nil
+	}
+
+	// 第一步：拉取镜像
+	progressBar.SetCurrentOperation("⬇️ 正在拉取最新镜像...")
 	pullResults, err := u.executeDockerComposePullWithProgress(dir, fileName, cf, progressBar, fileIndex)
 	if err != nil {
 		return nil, fmt.Errorf("拉取镜像失败: %v", err)
 	}
 
 	// 第二步：重启服务
-	progressBar.UpdateWithMessage(fileIndex, "🔄 正在重启服务...")
+	progressBar.SetCurrentOperation("🔄 正在重启服务...")
 	upResults, err := u.executeDockerComposeUpWithProgress(dir, fileName, cf, progressBar, fileIndex)
 	if err != nil {
 		return nil, fmt.Errorf("重启服务失败: %v", err)
@@ -265,23 +368,34 @@ func (u *Updater) executeDockerComposeUpWithProgress(dir, fileName string, cf *t
 
 // monitorPullProgress 监控 docker-compose pull 的输出并更新进度
 func (u *Updater) monitorPullProgress(stdout, stderr io.ReadCloser, progressBar *ui.ProgressBar, fileIndex int, cf *types.ComposeFile) {
+	// 用于限制更新频率
+	lastUpdate := time.Now()
+	updateInterval := 200 * time.Millisecond
+
 	// 读取 stdout
 	go func() {
 		defer stdout.Close()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
+
+			// 节流控制 - 避免过于频繁的更新
+			if time.Since(lastUpdate) < updateInterval {
+				continue
+			}
+
 			if strings.Contains(line, "Pulling") {
 				// 提取服务名
 				parts := strings.Fields(line)
 				if len(parts) > 1 {
 					serviceName := strings.TrimSuffix(parts[1], "...")
 					progressBar.SetCurrentOperation(fmt.Sprintf("⬇️ 拉取镜像: %s", serviceName))
+					lastUpdate = time.Now()
 				}
 			} else if strings.Contains(line, "Downloaded") {
 				progressBar.SetCurrentOperation("✅ 镜像下载完成")
+				lastUpdate = time.Now()
 			}
-			time.Sleep(50 * time.Millisecond) // 避免过于频繁的更新
 		}
 	}()
 
@@ -291,8 +405,15 @@ func (u *Updater) monitorPullProgress(stdout, stderr io.ReadCloser, progressBar 
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
+
+			// 节流控制
+			if time.Since(lastUpdate) < updateInterval {
+				continue
+			}
+
 			if strings.Contains(line, "Error") || strings.Contains(line, "error") {
 				progressBar.SetCurrentOperation("❌ 拉取过程中出现错误")
+				lastUpdate = time.Now()
 			}
 		}
 	}()
@@ -413,4 +534,112 @@ func (u *Updater) shouldExcludeImage(image string) bool {
 		}
 	}
 	return false
+}
+
+// executeDockerComposePullWithMultiProgress 执行 docker-compose pull 命令并显示多进度条
+func (u *Updater) executeDockerComposePullWithMultiProgress(dir, fileName string, cf *types.ComposeFile, multiProgressBar *ui.MultiProgressBar, fileIndex int) ([]*types.UpdateResult, error) {
+	var results []*types.UpdateResult
+
+	// 构建 docker-compose pull 命令
+	var cmd *exec.Cmd
+	if fileName == "docker-compose.yml" || fileName == "docker-compose.yaml" {
+		cmd = exec.Command("docker-compose", "pull")
+	} else {
+		cmd = exec.Command("docker-compose", "-f", fileName, "pull")
+	}
+	cmd.Dir = dir
+
+	// 创建上下文以便取消操作
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	cmd = exec.CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...)
+	cmd.Dir = dir
+
+	// 更新进度
+	multiProgressBar.UpdateFile(fileIndex, 40, "⬇️ 开始拉取镜像...")
+
+	// 执行命令
+	_, err := cmd.CombinedOutput()
+
+	// 更新进度
+	multiProgressBar.UpdateFile(fileIndex, 60, "⬇️ 镜像拉取完成")
+
+	// 为每个服务创建结果
+	for serviceName, service := range cf.Services {
+		if service.Image == "" {
+			continue
+		}
+
+		result := &types.UpdateResult{
+			Service:   serviceName,
+			OldImage:  service.Image,
+			NewImage:  service.Image,
+			Success:   err == nil,
+			Error:     err,
+			UpdatedAt: time.Now(),
+		}
+
+		if err == nil {
+			result.NewImage = service.Image + " (已拉取)"
+		}
+
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// executeDockerComposeUpWithMultiProgress 执行 docker-compose up -d 命令并显示多进度条
+func (u *Updater) executeDockerComposeUpWithMultiProgress(dir, fileName string, cf *types.ComposeFile, multiProgressBar *ui.MultiProgressBar, fileIndex int) ([]*types.UpdateResult, error) {
+	var results []*types.UpdateResult
+
+	// 构建 docker-compose up -d 命令
+	var cmd *exec.Cmd
+	if fileName == "docker-compose.yml" || fileName == "docker-compose.yaml" {
+		cmd = exec.Command("docker-compose", "up", "-d")
+	} else {
+		cmd = exec.Command("docker-compose", "-f", fileName, "up", "-d")
+	}
+	cmd.Dir = dir
+
+	// 创建上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd = exec.CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...)
+	cmd.Dir = dir
+
+	// 更新进度
+	multiProgressBar.UpdateFile(fileIndex, 80, "🔄 重启服务中...")
+
+	// 获取输出
+	output, err := cmd.CombinedOutput()
+
+	// 更新进度
+	multiProgressBar.UpdateFile(fileIndex, 95, "🔄 服务重启完成")
+
+	// 创建结果
+	for serviceName, service := range cf.Services {
+		if service.Image == "" {
+			continue
+		}
+
+		result := &types.UpdateResult{
+			Service:   serviceName,
+			OldImage:  service.Image,
+			NewImage:  service.Image,
+			Success:   err == nil,
+			Error:     err,
+			UpdatedAt: time.Now(),
+		}
+
+		// 检查输出以确定是否有更新
+		outputStr := string(output)
+		if strings.Contains(outputStr, serviceName) && (strings.Contains(outputStr, "Starting") || strings.Contains(outputStr, "Recreating")) {
+			result.NewImage = service.Image + " (已重启)"
+		}
+
+		results = append(results, result)
+	}
+
+	return results, nil
 }

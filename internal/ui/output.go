@@ -134,7 +134,7 @@ func PrintTable(headers []string, rows [][]string) {
 	fmt.Println() // 表格前添加空行
 
 	terminalWidth := getTerminalWidth()
-	
+
 	// 检查是否为小屏幕（宽度小于100）
 	if terminalWidth < 100 {
 		printCompactTable(headers, rows)
@@ -169,9 +169,9 @@ func PrintTable(headers []string, rows [][]string) {
 	if totalWidth > terminalWidth-5 { // 预留5个字符的边距
 		availableWidth := terminalWidth - 5 - (len(colWidths)*3 + 1)
 		scaleFactor := float64(availableWidth) / float64(totalWidth-(len(colWidths)*3+1))
-		
+
 		for i := range colWidths {
-			newWidth := max(8, int(float64(colWidths[i]) * scaleFactor)) // 最小宽度8
+			newWidth := max(8, int(float64(colWidths[i])*scaleFactor)) // 最小宽度8
 			colWidths[i] = newWidth
 		}
 	}
@@ -233,20 +233,20 @@ func printCompactTable(_ []string, rows [][]string) {
 	// 对于小屏幕，使用列表格式显示
 	for i, row := range rows {
 		fmt.Printf("%s %s\n", bold.Sprint(fmt.Sprintf("[%s]", row[0])), cyan.Sprint(row[1])) // 序号和项目名称
-		
+
 		if len(row) > 2 && row[2] != "" {
 			fmt.Printf("    📁 %s\n", truncateString(row[2], 60)) // 文件路径
 		}
-		
+
 		if len(row) > 3 && row[3] != "" {
 			fmt.Printf("    🔧 服务数量: %s\n", row[3])
 		}
-		
+
 		if len(row) > 4 && row[4] != "" {
 			services := truncateString(row[4], 50)
 			fmt.Printf("    🐳 镜像服务: %s\n", services)
 		}
-		
+
 		if i < len(rows)-1 {
 			fmt.Printf("%s\n", strings.Repeat("─", 50))
 		}
@@ -261,7 +261,142 @@ type ProgressBar struct {
 	width     int
 	prefix    string
 	currentOp string
+	finished  bool       // 添加完成标志
+	started   bool       // 添加开始标志
 	mutex     sync.Mutex // 添加互斥锁防止并发渲染
+}
+
+// MultiProgressBar represents multiple progress bars for multiple files
+type MultiProgressBar struct {
+	bars  []*ProgressBar
+	mutex sync.Mutex
+}
+
+// NewMultiProgressBar creates a new multi-progress bar
+func NewMultiProgressBar(fileNames []string) *MultiProgressBar {
+	bars := make([]*ProgressBar, len(fileNames))
+	for i := range fileNames {
+		bars[i] = &ProgressBar{
+			total:     100, // 使用百分比作为进度
+			current:   0,
+			width:     40,
+			prefix:    fmt.Sprintf("[%d]", i+1),
+			currentOp: "",
+			finished:  false,
+			started:   false,
+		}
+	}
+	return &MultiProgressBar{
+		bars: bars,
+	}
+}
+
+// UpdateFile updates the progress for a specific file
+func (mpb *MultiProgressBar) UpdateFile(fileIndex int, progress int, message string) {
+	mpb.mutex.Lock()
+	defer mpb.mutex.Unlock()
+
+	if fileIndex >= len(mpb.bars) {
+		return
+	}
+
+	bar := mpb.bars[fileIndex]
+	bar.mutex.Lock()
+	bar.current = progress
+	bar.currentOp = message
+	bar.started = true
+	if progress >= 100 {
+		bar.finished = true
+		bar.currentOp = "✅ 完成"
+	}
+	bar.mutex.Unlock()
+
+	mpb.renderAll()
+}
+
+// FinishFile marks a file as finished
+func (mpb *MultiProgressBar) FinishFile(fileIndex int) {
+	mpb.mutex.Lock()
+	defer mpb.mutex.Unlock()
+
+	if fileIndex >= len(mpb.bars) {
+		return
+	}
+
+	bar := mpb.bars[fileIndex]
+	bar.mutex.Lock()
+	bar.current = 100
+	bar.finished = true
+	bar.currentOp = "✅ 完成"
+	bar.mutex.Unlock()
+
+	mpb.renderAll()
+}
+
+// renderAll renders all progress bars
+func (mpb *MultiProgressBar) renderAll() {
+	// 移动到第一行开始位置
+	if len(mpb.bars) > 1 {
+		fmt.Printf("\033[%dA", len(mpb.bars))
+	}
+
+	for _, bar := range mpb.bars {
+		bar.mutex.Lock()
+
+		percent := float64(bar.current) / 100.0
+		filled := int(percent * float64(bar.width))
+
+		filledBar := strings.Repeat("█", filled)
+		emptyBar := strings.Repeat("░", bar.width-filled)
+
+		// 清除当前行
+		fmt.Print("\r\033[K")
+
+		message := ""
+		if bar.currentOp != "" {
+			message = fmt.Sprintf(" - %s", bar.currentOp)
+		}
+
+		if bar.finished {
+			fmt.Printf("%s [%s] 100%%%s\n",
+				bar.prefix,
+				green.Sprint(filledBar+emptyBar),
+				message)
+		} else if bar.started {
+			fmt.Printf("%s [%s] %d%%%s\n",
+				bar.prefix,
+				green.Sprint(filledBar)+white.Sprint(emptyBar),
+				bar.current,
+				message)
+		} else {
+			fmt.Printf("%s [%s] 0%% - 等待中...\n",
+				bar.prefix,
+				white.Sprint(strings.Repeat("░", bar.width)))
+		}
+
+		bar.mutex.Unlock()
+	}
+
+	os.Stdout.Sync()
+}
+
+// Finish completes all progress bars
+func (mpb *MultiProgressBar) Finish() {
+	mpb.mutex.Lock()
+	defer mpb.mutex.Unlock()
+
+	for _, bar := range mpb.bars {
+		bar.mutex.Lock()
+		if !bar.finished {
+			bar.current = 100
+			bar.finished = true
+			bar.currentOp = "✅ 完成"
+		}
+		bar.mutex.Unlock()
+	}
+
+	mpb.renderAll()
+	fmt.Println() // 最后换行
 }
 
 // NewProgressBar creates a new progress bar
@@ -271,6 +406,8 @@ func NewProgressBar(total int, prefix string) *ProgressBar {
 		width:     50,
 		prefix:    prefix,
 		currentOp: "",
+		finished:  false,
+		started:   false,
 	}
 }
 
@@ -278,8 +415,15 @@ func NewProgressBar(total int, prefix string) *ProgressBar {
 func (pb *ProgressBar) Update(current int) {
 	pb.mutex.Lock()
 	defer pb.mutex.Unlock()
-	
+
 	pb.current = current
+
+	// 如果进度条已经完成，则不渲染
+	if pb.finished {
+		return
+	}
+
+	pb.started = true
 	pb.render()
 }
 
@@ -287,9 +431,16 @@ func (pb *ProgressBar) Update(current int) {
 func (pb *ProgressBar) UpdateWithMessage(current int, message string) {
 	pb.mutex.Lock()
 	defer pb.mutex.Unlock()
-	
+
 	pb.current = current
 	pb.currentOp = message
+
+	// 如果进度条已经完成，则不渲染
+	if pb.finished {
+		return
+	}
+
+	pb.started = true
 	pb.render()
 }
 
@@ -297,19 +448,39 @@ func (pb *ProgressBar) UpdateWithMessage(current int, message string) {
 func (pb *ProgressBar) Finish() {
 	pb.mutex.Lock()
 	defer pb.mutex.Unlock()
-	
+
+	// 如果已经完成，就不需要重新处理
+	if pb.finished {
+		return
+	}
+
 	pb.current = pb.total
 	pb.currentOp = ""
+	pb.finished = true
 	pb.render()
-	fmt.Println()
+
+	// 确保输出完成后换行
+	fmt.Print("\n")
+	os.Stdout.Sync()
 }
 
 // SetCurrentOperation sets the current operation message without updating progress
 func (pb *ProgressBar) SetCurrentOperation(message string) {
 	pb.mutex.Lock()
 	defer pb.mutex.Unlock()
-	
+
+	// 如果消息相同，则不需要重新渲染
+	if pb.currentOp == message {
+		return
+	}
+
 	pb.currentOp = message
+
+	// 如果进度条已经完成或还没开始，则不渲染
+	if pb.finished || !pb.started {
+		return
+	}
+
 	pb.render()
 }
 
@@ -343,9 +514,12 @@ func (pb *ProgressBar) render() {
 	filledBar := strings.Repeat("█", filled)
 	emptyBar := strings.Repeat("░", pb.width-filled)
 
+	// 清除当前行
+	fmt.Print("\r\033[K")
+
 	// 检查是否完成
 	if pb.current >= pb.total {
-		fmt.Printf("\r%s [%s] 100%% (%d/%d) ✅ 完成",
+		fmt.Printf("%s [%s] 100%% (%d/%d) ✅ 完成",
 			pb.prefix,
 			green.Sprint(filledBar+emptyBar),
 			pb.total,
@@ -355,7 +529,7 @@ func (pb *ProgressBar) render() {
 		if pb.currentOp != "" {
 			message = fmt.Sprintf(" - %s", pb.currentOp)
 		}
-		fmt.Printf("\r%s [%s] %.0f%% (%d/%d)%s",
+		fmt.Printf("%s [%s] %.0f%% (%d/%d)%s",
 			pb.prefix,
 			green.Sprint(filledBar)+white.Sprint(emptyBar),
 			percent*100,
