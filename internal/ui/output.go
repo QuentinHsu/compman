@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -260,6 +261,7 @@ type ProgressBar struct {
 	width     int
 	prefix    string
 	currentOp string
+	mutex     sync.Mutex // 添加互斥锁防止并发渲染
 }
 
 // NewProgressBar creates a new progress bar
@@ -274,12 +276,18 @@ func NewProgressBar(total int, prefix string) *ProgressBar {
 
 // Update updates the progress bar
 func (pb *ProgressBar) Update(current int) {
+	pb.mutex.Lock()
+	defer pb.mutex.Unlock()
+	
 	pb.current = current
 	pb.render()
 }
 
 // UpdateWithMessage updates the progress bar with a current operation message
 func (pb *ProgressBar) UpdateWithMessage(current int, message string) {
+	pb.mutex.Lock()
+	defer pb.mutex.Unlock()
+	
 	pb.current = current
 	pb.currentOp = message
 	pb.render()
@@ -287,6 +295,9 @@ func (pb *ProgressBar) UpdateWithMessage(current int, message string) {
 
 // Finish completes the progress bar
 func (pb *ProgressBar) Finish() {
+	pb.mutex.Lock()
+	defer pb.mutex.Unlock()
+	
 	pb.current = pb.total
 	pb.currentOp = ""
 	pb.render()
@@ -295,6 +306,9 @@ func (pb *ProgressBar) Finish() {
 
 // SetCurrentOperation sets the current operation message without updating progress
 func (pb *ProgressBar) SetCurrentOperation(message string) {
+	pb.mutex.Lock()
+	defer pb.mutex.Unlock()
+	
 	pb.currentOp = message
 	pb.render()
 }
